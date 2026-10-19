@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import TxActivityButton from "./TxActivityButton.jsx";
 
 const LINKS = [
   { href: "/", label: "Home" },
@@ -22,15 +23,18 @@ export default function SiteHeader() {
           <span className="logo" aria-hidden="true">L</span>
           LiquiFact
         </Link>
-        <button
-          className="menu-btn"
-          aria-expanded={open}
-          aria-controls="main-nav"
-          aria-label="Toggle navigation"
-          onClick={() => setOpen((o) => !o)}
-        >
-          {open ? "✕" : "☰"}
-        </button>
+        <div className="header-actions" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <TxActivityButton />
+          <button
+            className="menu-btn"
+            aria-expanded={open}
+            aria-controls="main-nav"
+            aria-label="Toggle navigation"
+            onClick={() => setOpen((o) => !o)}
+          >
+            {open ? "✕" : "☰"}
+          </button>
+        </div>
         <nav id="main-nav" className={`nav${open ? " open" : ""}`} aria-label="Main">
           {LINKS.map((l) => (
             <Link

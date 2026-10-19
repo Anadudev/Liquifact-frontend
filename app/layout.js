@@ -1,6 +1,7 @@
 import "./globals.css";
 import SiteHeader from "@/components/SiteHeader";
 import SiteFooter from "@/components/SiteFooter";
+import { TxTrackerProvider } from "@/components/TxTrackerProvider.jsx";
 
 export const metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://liquifact-frontend.vercel.app"),
@@ -16,9 +17,11 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body>
-        <SiteHeader />
-        <main id="main">{children}</main>
-        <SiteFooter />
+        <TxTrackerProvider>
+          <SiteHeader />
+          <main id="main">{children}</main>
+          <SiteFooter />
+        </TxTrackerProvider>
       </body>
     </html>
   );
