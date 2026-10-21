@@ -131,14 +131,7 @@ describe("pollTransaction - timeout", () => {
 });
 
 describe("pollTransaction - abort signal", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(0);
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
+  // No fake timers needed for abort tests
   it("aborts cleanly when signal fires before first poll", async () => {
     const controller = new AbortController();
     const server = createMockServer([NOT_FOUND_RESPONSE]);
@@ -148,8 +141,6 @@ describe("pollTransaction - abort signal", () => {
       signal: controller.signal,
     });
     controller.abort();
-    vi.advanceTimersByTime(100);
-    await vi.runOnlyPendingTimersAsync();
     await expect(promise).rejects.toMatchObject({ name: "AbortError" });
   });
 
@@ -161,11 +152,9 @@ describe("pollTransaction - abort signal", () => {
       timeoutMs: 5000,
       signal: controller.signal,
     });
-    vi.advanceTimersByTime(100);
-    await vi.runOnlyPendingTimersAsync();
+    // Allow polling to start
+    await new Promise(r => setTimeout(r, 10));
     controller.abort();
-    vi.advanceTimersByTime(100);
-    await vi.runOnlyPendingTimersAsync();
     await expect(promise).rejects.toMatchObject({ name: "AbortError" });
   });
 
