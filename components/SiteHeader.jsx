@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import TxActivityButton from "./TxActivityButton.jsx";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const LINKS = [
   { href: "/", label: "Home" },
@@ -26,6 +27,7 @@ export default function SiteHeader() {
         </Link>
         <div className="header-actions" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <TxActivityButton />
+          <ThemeToggle />
           <button
             className="menu-btn"
             aria-expanded={open}
