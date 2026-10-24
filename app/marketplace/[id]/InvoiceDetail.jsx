@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import StatusBadge from "@/components/StatusBadge";
 import ContractCard from "@/components/ContractCard";
+import { useNotifications } from "@/components/NotificationsProvider";
 import FundersTable from "@/components/escrow/FundersTable";
 import { fundInvoice, getInvoice } from "@/lib/api";
 import BalanceHint from "@/components/wallet/BalanceHint";
@@ -15,6 +16,7 @@ export default function InvoiceDetail({ id }) {
   const [amount, setAmount] = useState("");
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
+  const { follow, unfollow, isFollowing } = useNotifications();
   const [walletAddress, setWalletAddress] = useState(null);
   const [balanceValidation, setBalanceValidation] = useState({ ok: true, message: null });
 
@@ -47,6 +49,7 @@ export default function InvoiceDetail({ id }) {
       const { data } = await fundInvoice(id, n);
       setState((s) => ({ ...s, data }));
       setAmount("");
+      follow(id); // auto-follow so future status changes surface in the bell
       setMsg({ kind: "ok", text: `Contribution of ${formatAmount(n, data.currency)} recorded.` });
     } catch (err) {
       setMsg({ kind: "err", text: err.message || "Funding failed." });
@@ -90,6 +93,14 @@ export default function InvoiceDetail({ id }) {
           <div style={{ display: "flex", gap: 8 }}>
             <StatusBadge status={inv.status} />
             {inv.onChain && <span className="badge badge-chain">on-chain</span>}
+            <button
+              className="btn-ghost"
+              aria-pressed={isFollowing(id)}
+              aria-label={isFollowing(id) ? "Unfollow invoice" : "Follow invoice"}
+              onClick={() => (isFollowing(id) ? unfollow(id) : follow(id))}
+            >
+              {isFollowing(id) ? "Following ✓" : "Follow"}
+            </button>
           </div>
         </div>
         {state.offline && <div className="notice notice-warn" style={{ marginBottom: 20 }}>API unreachable — showing demo data.</div>}
