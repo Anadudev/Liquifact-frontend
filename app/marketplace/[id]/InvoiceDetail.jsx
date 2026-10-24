@@ -6,6 +6,7 @@ import StatusBadge from "@/components/StatusBadge";
 import ContractCard from "@/components/ContractCard";
 import { useNotifications } from "@/components/NotificationsProvider";
 import FundersTable from "@/components/escrow/FundersTable";
+import TokenCheck, { useFundingTokenCheck } from "@/components/escrow/TokenCheck";
 import { fundInvoice, getInvoice } from "@/lib/api";
 import BalanceHint from "@/components/wallet/BalanceHint";
 import { getWalletAddress } from "@/lib/stellar/freighter";
@@ -19,6 +20,7 @@ export default function InvoiceDetail({ id }) {
   const { follow, unfollow, isFollowing } = useNotifications();
   const [walletAddress, setWalletAddress] = useState(null);
   const [balanceValidation, setBalanceValidation] = useState({ ok: true, message: null });
+  const tokenCheck = useFundingTokenCheck(state.data, { enabled: Boolean(state.data?.onChain) });
 
   useEffect(() => {
     let alive = true;
@@ -135,7 +137,8 @@ export default function InvoiceDetail({ id }) {
                     <BalanceHint currency={inv.currency} address={walletAddress} amount={amount} onUseMax={(v) => setAmount(v)} onValidation={setBalanceValidation} />
                   </span>
                 </div>
-                <button className="btn btn-primary" disabled={busy || state.offline || !balanceValidation.ok}>{busy ? "Submitting…" : "Fund invoice"}</button>
+                {inv.onChain && <TokenCheck invoice={inv} check={tokenCheck} />}
+                <button className="btn btn-primary" disabled={busy || state.offline || !balanceValidation.ok || !tokenCheck.ok}>{busy ? "Submitting…" : "Fund invoice"}</button>
               </form>
             ) : (
               <p className="muted" style={{ marginTop: 12 }}>This invoice is <strong>{inv.status}</strong> and no longer accepts contributions.</p>
