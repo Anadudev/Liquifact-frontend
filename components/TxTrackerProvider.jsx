@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { getDefaultStore } from "@/lib/stellar/txStore.js";
 import { pollTransaction, RESULT } from "@/lib/stellar/pollTx.js";
-import { getRpc } from "@/lib/stellar/rpc.js";
+import { getRpcServer } from "@/lib/stellar/rpc.js";
 
 const TxTrackerContext = createContext(null);
 
@@ -49,7 +49,7 @@ export function TxTrackerProvider({ children }) {
     pollingRef.current.set(hash, controller);
 
     try {
-      const rpc = getRpc();
+      const rpc = getRpcServer();
       const result = await pollTransaction(rpc, hash, { signal: controller.signal });
 
       let finalStatus;

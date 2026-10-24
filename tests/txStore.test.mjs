@@ -5,7 +5,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createTxStore, STATUS } from "../../lib/stellar/txStore.js";
+import { createTxStore, STATUS } from "../lib/stellar/txStore.js";
 
 // ── Mock Storage ──────────────────────────────────────────────────────────────
 
