@@ -52,6 +52,7 @@ export default function TxActivityButton() {
 
   // Dev-only demo: if ?debugTx= present on initial load, track a demo transaction
   useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
     const params = new URLSearchParams(window.location.search);
     if (params.has("debugTx")) {
       const demoHash = params.get("debugTx") || "0".repeat(64);
