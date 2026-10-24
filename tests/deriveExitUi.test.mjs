@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deriveExitUi, parseStroops, formatStroops, STROOPS_PER_UNIT } from "../../lib/invest/deriveExitUi.js";
+import { deriveExitUi, parseStroops, formatStroops, STROOPS_PER_UNIT } from "../lib/invest/deriveExitUi.js";
 
 // ── deriveExitUi ─────────────────────────────────────────────────────────────
 
