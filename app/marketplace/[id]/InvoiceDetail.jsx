@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import StatusBadge from "@/components/StatusBadge";
 import RiskBadge from "@/components/RiskBadge";
 import RiskFactorsCard from "@/components/RiskFactorsCard";
@@ -11,13 +11,25 @@ import EscrowRules from "@/components/escrow/EscrowRules";
 import { useNotifications } from "@/components/NotificationsProvider";
 import FundersTable from "@/components/escrow/FundersTable";
 import TokenCheck, { useFundingTokenCheck } from "@/components/escrow/TokenCheck";
-import { fundInvoice, getInvoice, listInvoices } from "@/lib/api";
+import { fundInvoice, getEscrowLive, getInvoice, listInvoices } from "@/lib/api";
 import BalanceHint from "@/components/wallet/BalanceHint";
 import { getWalletAddress } from "@/lib/stellar/freighter";
 import { bpsToPercent, formatAmount, formatDate, fundedPercent, shortAddress } from "@/lib/format";
 import { computeListMedians, scoreInvoice } from "@/lib/risk";
 import { loadConstraints, validateContribution, maxFillAmount, CODES } from "@/lib/escrow/constraints";
-import { parseToStroops, stroopsToDisplay } from "@/lib/stellar/amount";
+import { parseToStroops, remainingStroops, stroopsToDisplay } from "@/lib/stellar/amount";
+import { useOnChainFund } from "@/lib/hooks/useOnChainFund";
+import { CONTRACT_ID, NETWORK } from "@/lib/config";
+
+const ESCROW_STATUSES = ["open", "funded", "settled", "withdrawn", "cancelled"];
+
+function onChainRemaining(inv) {
+  try {
+    return stroopsToDisplay(remainingStroops(inv));
+  } catch {
+    return Math.max(0, Number(inv.amount) - Number(inv.fundedAmount));
+  }
+}
 
 // ExitPanel uses @stellar/stellar-sdk and the Freighter browser API — SSR-unsafe.
 // Lazy-load so the Soroban SDK never runs on the server.
@@ -37,6 +49,25 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
   const [walletAddress, setWalletAddress] = useState(null);
   const [balanceValidation, setBalanceValidation] = useState({ ok: true, message: null });
   const tokenCheck = useFundingTokenCheck(state.data, { enabled: Boolean(state.data?.onChain) });
+  const apiLock = useRef(false);
+  const chain = useOnChainFund();
+  // Prefer the account explicitly connected for signing; fall back to the detected wallet.
+  const investorAddress = chain.address || walletAddress;
+
+  // Re-read the invoice and overlay the live escrow totals/status after an on-chain contribution.
+  async function refreshInvoice() {
+    const [invoice, live] = await Promise.all([getInvoice(id), getEscrowLive().catch(() => null)]);
+    if (invoice.data && live?.contractId === CONTRACT_ID && live.escrow?.invoice_id === id) {
+      const escrow = live.escrow;
+      invoice.data = {
+        ...invoice.data,
+        amount: stroopsToDisplay(BigInt(escrow.funding_target ?? escrow.amount)),
+        fundedAmount: stroopsToDisplay(BigInt(escrow.funded_amount)),
+        status: ESCROW_STATUSES[escrow.status] ?? invoice.data.status,
+      };
+    }
+    setState({ loading: false, ...invoice });
+  }
 
   useEffect(() => {
     let alive = true;
@@ -112,17 +143,27 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
         setMsg({ kind: "err", text: v.message });
         return;
       }
-    } else {
-      const n = Number(amount);
-      if (!(n > 0)) {
-        setMsg({ kind: "err", text: "Enter a positive amount." });
-        return;
-      }
     }
+    if (inv?.onChain) {
+      // On-chain invoices: build + simulate fund(investor, amount), sign with Freighter, submit.
+      const result = await chain.fund(inv, amount.trim(), refreshInvoice);
+      if (result?.status === "SUCCESS") {
+        setAmount("");
+        follow(id); // auto-follow so future status changes surface in the bell
+      }
+      return;
+    }
+    if (apiLock.current) return;
+    const n = Number(amount);
+    if (!(n > 0)) {
+      setMsg({ kind: "err", text: "Enter a positive amount." });
+      return;
+    }
+    apiLock.current = true;
     setBusy(true);
     setMsg(null);
     try {
-      const { data } = await fundInvoice(id, Number(amount));
+      const { data } = await fundInvoice(id, n);
       setState((s) => ({ ...s, data }));
       setAmount("");
       follow(id); // auto-follow so future status changes surface in the bell
@@ -130,6 +171,7 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
     } catch (err) {
       setMsg({ kind: "err", text: err.message || "Funding failed." });
     } finally {
+      apiLock.current = false;
       setBusy(false);
     }
   }
@@ -158,12 +200,13 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
   }
 
   const pct = fundedPercent(inv);
-  const remaining = Math.max(0, inv.amount - inv.fundedAmount);
+  const remaining = inv.onChain ? onChainRemaining(inv) : Math.max(0, inv.amount - inv.fundedAmount);
+  const fundingBusy = inv.onChain ? chain.busy || chain.connecting : busy;
   const isCancelled = inv.status === "cancelled";
   const risk = scoreInvoice(inv, undefined, medians);
 
   return (
-    <section className="section">
+    <section className="section invoice-detail">
       <div className="container">
         <Link href="/marketplace" className="muted">← Marketplace</Link>
         <div className="invoice-head" style={{ marginTop: 14, marginBottom: 24 }}>
@@ -207,8 +250,16 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
             {inv.onChain && rules.data && <EscrowRules constraints={rules.data} currency={inv.currency} />}
           </div>
 
-          <div className="card">
+          <div className="card funding-card">
             <h3>Fund this invoice</h3>
+            {inv.onChain && (
+              <div className="wallet-connection">
+                <p className="muted">{chain.address ? `Connected: ${shortAddress(chain.address, 8)}` : "Connect Freighter to fund this invoice."} &middot; {NETWORK}</p>
+                <button type="button" className="btn btn-ghost focus-ring" onClick={chain.connect} disabled={fundingBusy || chain.pending}>
+                  {chain.connecting ? "Connecting..." : chain.address ? "Reconnect Freighter" : "Connect Freighter"}
+                </button>
+              </div>
+            )}
             {inv.status === "open" ? (
               <form className="form" onSubmit={onFund} style={{ marginTop: 12 }}>
                 <div className="field">
@@ -216,6 +267,7 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
                   <div className="amount-row">
                     <input
                       id="amount"
+                      className="focus-ring"
                       type="text"
                       inputMode="decimal"
                       value={amount}
@@ -223,6 +275,7 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
                       placeholder={`Up to ${remaining}`}
                       aria-invalid={validation && !validation.ok ? true : undefined}
                       aria-describedby="amount-error amount-hint amount-balance"
+                      disabled={fundingBusy || (inv.onChain && chain.pending)}
                     />
                     {inv.onChain && maxFill !== null && maxFill > 0n && (
                       <button
@@ -237,13 +290,15 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
                   <span className="hint" id="amount-hint">
                     {inv.onChain && rules.loading
                       ? "Checking escrow rules…"
-                      : "Demo mode: contributions are recorded by the API; on-chain funding uses the escrow’s fund entrypoint."}
+                      : inv.onChain
+                        ? `Up to ${remaining} ${inv.currency}. Review the amount and network in Freighter before signing.`
+                        : "Demo mode: contributions are recorded by the API."}
                   </span>
                   <span className="field-error" id="amount-error" aria-live="polite">
                     {validation && !validation.ok ? validation.message : ""}
                   </span>
                   <span id="amount-balance">
-                    <BalanceHint currency={inv.currency} address={walletAddress} amount={amount} onUseMax={(v) => setAmount(v)} onValidation={setBalanceValidation} />
+                    <BalanceHint currency={inv.currency} address={investorAddress} amount={amount} onUseMax={(v) => setAmount(v)} onValidation={setBalanceValidation} />
                   </span>
                 </div>
                 {inv.onChain && rules.error && (
@@ -252,8 +307,19 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
                   </div>
                 )}
                 {inv.onChain && <TokenCheck invoice={inv} check={tokenCheck} />}
-                <button className="btn btn-primary" disabled={fundDisabled || !balanceValidation.ok || !tokenCheck.ok}>
-                  {busy ? "Submitting…" : blocking ? blocking.message : "Fund invoice"}
+                <button
+                  className="btn btn-primary focus-ring"
+                  disabled={fundDisabled || fundingBusy || !balanceValidation.ok || !tokenCheck.ok || (inv.onChain && (!chain.address || chain.pending))}
+                >
+                  {inv.onChain && chain.busy
+                    ? `${chain.state.phase}...`
+                    : busy
+                      ? "Submitting…"
+                      : blocking
+                        ? blocking.message
+                        : inv.onChain
+                          ? "Sign & fund"
+                          : "Fund invoice"}
                 </button>
               </form>
             ) : (
@@ -264,19 +330,34 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
                   : " and no longer accepts contributions."}
               </p>
             )}
+            {inv.onChain && (
+              <div className="funding-status" role="status" aria-live="polite" aria-atomic="true">
+                {(chain.state.phase || chain.state.message) && (
+                  <div className={`notice notice-${chain.state.kind}`}>
+                    {chain.state.phase && <strong>{chain.state.phase}</strong>}
+                    {chain.state.message && <p>{chain.state.message}</p>}
+                    {chain.state.hash && (
+                      <a className="focus-ring tx-hash" href={`https://stellar.expert/explorer/${NETWORK}/tx/${chain.state.hash}`} target="_blank" rel="noopener noreferrer">
+                        View transaction: {chain.state.hash}
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             {msg && <div role="status" aria-live="polite" className={`notice notice-${msg.kind}`} style={{ marginTop: 14 }}>{msg.text}</div>}
 
             {/* ── Investor exit panel (on-chain invoices, connected wallet only) ── */}
-            {inv.onChain && walletAddress && (
+            {inv.onChain && investorAddress && (
               <ExitPanel
-                investorAddress={walletAddress}
+                investorAddress={investorAddress}
                 invoiceStatus={inv.status}
                 onContribRefresh={onContribRefresh}
               />
             )}
 
             {/* Prompt to connect wallet if not connected and invoice is on-chain */}
-            {inv.onChain && !walletAddress && (
+            {inv.onChain && !investorAddress && (
               <p className="muted exit-wallet-prompt" style={{ marginTop: 16, fontSize: "0.9rem" }}>
                 Connect your Freighter wallet to manage your position.
               </p>

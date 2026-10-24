@@ -14,11 +14,23 @@ vi.mock("@/lib/escrow/token", async (importOriginal) => ({
   ...(await importOriginal()),
   resolveFundingToken: vi.fn(async () => "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"),
 }));
+// On-chain invoices fund through Freighter (#1364): mock the wallet + submit layer.
+vi.mock("@/lib/stellar/freighter", async (importOriginal) => ({
+  ...(await importOriginal()),
+  connectFreighter: vi.fn(),
+  signWithFreighter: vi.fn(),
+}));
+vi.mock("@/lib/stellar/fund", () => ({ submitFund: vi.fn() }));
+vi.mock("@/components/wallet/BalanceHint", () => ({ default: () => null }));
+vi.mock("@/components/escrow/FundersTable", () => ({ default: () => null }));
+vi.mock("@/components/invest/ExitPanel", () => ({ default: () => null }));
 vi.mock("next/link", () => ({
   default: ({ children, href }) => <a href={href}>{children}</a>,
 }));
 
 import { getInvoice, fundInvoice } from "@/lib/api";
+import { connectFreighter } from "@/lib/stellar/freighter";
+import { submitFund } from "@/lib/stellar/fund";
 import InvoiceDetail from "@/app/marketplace/[id]/InvoiceDetail";
 
 const XLM = 10000000n;
@@ -42,8 +54,17 @@ function setup(constraintsResult, invoiceOverride) {
   return { loadConstraintsFn };
 }
 
+const WALLET = "GA7TXEBMEPQCLHIYCWDN7RKAO5IMRD2UV7O7TZXMEW6VZUMEXNR4XBB5";
+
+async function connectWallet(user) {
+  await user.click(await screen.findByRole("button", { name: "Connect Freighter" }));
+  await screen.findByText(/Connected:/);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  connectFreighter.mockResolvedValue(WALLET);
+  submitFund.mockResolvedValue({ status: "SUCCESS", hash: "a".repeat(64) });
 });
 
 afterEach(cleanup);
@@ -51,11 +72,13 @@ afterEach(cleanup);
 describe("InvoiceDetail fund form with escrow constraints", () => {
   it("keeps the form usable while rules are being checked", async () => {
     setup(new Promise(() => {})); // never resolves -> still checking
+    const user = userEvent.setup();
     const input = await screen.findByLabelText(/Amount/);
     expect(await screen.findByText(/Checking escrow rules/)).toBeTruthy();
     expect(input.disabled).toBe(false);
-    // Only the funding-token check (fail-closed) gates the button; pending rules do not.
-    await waitFor(() => expect(screen.getByRole("button", { name: "Fund invoice" }).disabled).toBe(false));
+    await connectWallet(user);
+    // Only the wallet + funding-token check (fail-closed) gate the button; pending rules do not.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Sign & fund" }).disabled).toBe(false));
   });
 
   it("Max button fills min(cap - contribution, remaining capacity)", async () => {
@@ -93,19 +116,22 @@ describe("InvoiceDetail fund form with escrow constraints", () => {
     await screen.findByText(/exceeds your remaining per-investor cap/);
     expect(input.getAttribute("aria-describedby")).toContain("amount-error");
     expect(document.getElementById("amount-error").textContent).toMatch(/per-investor cap/);
-    expect(screen.getByRole("button", { name: "Fund invoice" }).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Sign & fund" }).disabled).toBe(true);
     expect(fundInvoice).not.toHaveBeenCalled();
+    expect(submitFund).not.toHaveBeenCalled();
   });
 
   it("accepts an amount within every bound and submits", async () => {
-    fundInvoice.mockResolvedValue({ data: { ...invoice, fundedAmount: 550 } });
     setup(Promise.resolve(openRules));
     const user = userEvent.setup();
+    await connectWallet(user);
     const input = await screen.findByLabelText(/Amount/);
     await user.type(input, "250");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Fund invoice" }).disabled).toBe(false));
-    await user.click(screen.getByRole("button", { name: "Fund invoice" }));
-    await waitFor(() => expect(fundInvoice).toHaveBeenCalledWith("INV_0001", 250));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Sign & fund" }).disabled).toBe(false));
+    await user.click(screen.getByRole("button", { name: "Sign & fund" }));
+    await waitFor(() => expect(submitFund).toHaveBeenCalledTimes(1));
+    expect(submitFund.mock.calls[0][0].amountStroops).toBe(250n * XLM);
+    expect(fundInvoice).not.toHaveBeenCalled();
   });
 
   it("falls back to amount > 0 validation when the read fails", async () => {
@@ -115,12 +141,13 @@ describe("InvoiceDetail fund form with escrow constraints", () => {
     const user = userEvent.setup();
     const input = await screen.findByLabelText(/Amount/);
     expect(await screen.findByText(/falling back to basic validation/)).toBeTruthy();
+    await connectWallet(user);
     await user.type(input, "25");
-    const btn = screen.getByRole("button", { name: "Fund invoice" });
+    const btn = screen.getByRole("button", { name: "Sign & fund" });
     await waitFor(() => expect(btn.disabled).toBe(false));
-    fundInvoice.mockResolvedValue({ data: { ...invoice, fundedAmount: 325 } });
     await user.click(btn);
-    await waitFor(() => expect(fundInvoice).toHaveBeenCalledWith("INV_0001", 25));
+    await waitFor(() => expect(submitFund).toHaveBeenCalledTimes(1));
+    expect(submitFund.mock.calls[0][0].amountStroops).toBe(25n * XLM);
   });
 
   it("skips constraint loading for off-chain invoices", async () => {
