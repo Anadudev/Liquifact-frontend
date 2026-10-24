@@ -2,11 +2,24 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { resolve } from "path";
 import { fileURLToPath } from "url";
+import { transformWithEsbuild } from "vite";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    {
+      // Next app-router pages use JSX in .js files; transform them for UI tests.
+      name: "next-jsx-pages",
+      enforce: "pre",
+      async transform(code, id) {
+        if (/\/app\/.*\.js$/.test(id.replaceAll("\\", "/"))) {
+          return transformWithEsbuild(code, id, { loader: "jsx", jsx: "automatic" });
+        }
+      },
+    },
+    react(),
+  ],
   test: {
     environment: "jsdom",
     globals: true,

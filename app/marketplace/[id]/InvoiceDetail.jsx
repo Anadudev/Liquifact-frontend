@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import OfflineNotice from "@/components/pwa/OfflineNotice";
 import StatusBadge from "@/components/StatusBadge";
 import RiskBadge from "@/components/RiskBadge";
 import RiskFactorsCard from "@/components/RiskFactorsCard";
@@ -229,7 +230,7 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
             </button>
           </div>
         </div>
-        {state.offline && <div className="notice notice-warn" style={{ marginBottom: 20 }}>API unreachable — showing demo data.</div>}
+        <OfflineNotice {...state} />
 
         <div className="grid grid-2" style={{ alignItems: "start" }}>
           <div className="card">

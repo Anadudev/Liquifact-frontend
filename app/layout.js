@@ -1,6 +1,7 @@
 import "./globals.css";
 import { NotificationsProvider } from "@/components/NotificationsProvider";
 import SiteHeader from "@/components/SiteHeader";
+import ServiceWorkerRegistrar from "@/components/pwa/ServiceWorkerRegistrar";
 import SiteFooter from "@/components/SiteFooter";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
@@ -33,6 +34,7 @@ export default function RootLayout({ children }) {
           <main id="main">{children}</main>
           <SiteFooter />
         </NotificationsProvider>
+        <ServiceWorkerRegistrar />
       </body>
     </html>
   );
