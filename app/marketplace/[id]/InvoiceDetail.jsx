@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import StatusBadge from "@/components/StatusBadge";
@@ -17,6 +18,10 @@ import { bpsToPercent, formatAmount, formatDate, fundedPercent, shortAddress } f
 import { computeListMedians, scoreInvoice } from "@/lib/risk";
 import { loadConstraints, validateContribution, maxFillAmount, CODES } from "@/lib/escrow/constraints";
 import { parseToStroops, stroopsToDisplay } from "@/lib/stellar/amount";
+
+// ExitPanel uses @stellar/stellar-sdk and the Freighter browser API — SSR-unsafe.
+// Lazy-load so the Soroban SDK never runs on the server.
+const ExitPanel = dynamic(() => import("@/components/invest/ExitPanel"), { ssr: false });
 
 // Codes that disable the Fund button outright (amount edits cannot fix them).
 const BLOCKING_CODES = new Set([CODES.PAUSED, CODES.LEGAL_HOLD, CODES.DEADLINE_PASSED, CODES.NOT_OPEN]);
@@ -129,6 +134,11 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
     }
   }
 
+  // Refresh invoice data after a successful exit action
+  function onContribRefresh() {
+    getInvoice(id).then((r) => setState({ loading: false, ...r }));
+  }
+
   if (state.loading) {
     return (
       <section className="section"><div className="container"><div className="skeleton" style={{ minHeight: 320 }} /></div></section>
@@ -140,7 +150,7 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
       <section className="section">
         <div className="container center">
           <h1 style={{ fontSize: "2rem" }}>Invoice not found</h1>
-          <p className="lead">We couldn’t find invoice <code>{id}</code>.</p>
+          <p className="lead">We couldn&apos;t find invoice <code>{id}</code>.</p>
           <Link href="/marketplace" className="btn btn-primary">Back to marketplace</Link>
         </div>
       </section>
@@ -149,6 +159,7 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
 
   const pct = fundedPercent(inv);
   const remaining = Math.max(0, inv.amount - inv.fundedAmount);
+  const isCancelled = inv.status === "cancelled";
   const risk = scoreInvoice(inv, undefined, medians);
 
   return (
@@ -246,9 +257,30 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
                 </button>
               </form>
             ) : (
-              <p className="muted" style={{ marginTop: 12 }}>This invoice is <strong>{inv.status}</strong> and no longer accepts contributions.</p>
+              <p className="muted" style={{ marginTop: 12 }}>
+                This invoice is <strong>{inv.status}</strong>
+                {isCancelled
+                  ? " — see your exit options below."
+                  : " and no longer accepts contributions."}
+              </p>
             )}
             {msg && <div role="status" aria-live="polite" className={`notice notice-${msg.kind}`} style={{ marginTop: 14 }}>{msg.text}</div>}
+
+            {/* ── Investor exit panel (on-chain invoices, connected wallet only) ── */}
+            {inv.onChain && walletAddress && (
+              <ExitPanel
+                investorAddress={walletAddress}
+                invoiceStatus={inv.status}
+                onContribRefresh={onContribRefresh}
+              />
+            )}
+
+            {/* Prompt to connect wallet if not connected and invoice is on-chain */}
+            {inv.onChain && !walletAddress && (
+              <p className="muted exit-wallet-prompt" style={{ marginTop: 16, fontSize: "0.9rem" }}>
+                Connect your Freighter wallet to manage your position.
+              </p>
+            )}
           </div>
         </div>
 
