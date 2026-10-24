@@ -3,15 +3,18 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import StatusBadge from "@/components/StatusBadge";
+import RiskBadge from "@/components/RiskBadge";
+import RiskFactorsCard from "@/components/RiskFactorsCard";
 import ContractCard from "@/components/ContractCard";
 import EscrowRules from "@/components/escrow/EscrowRules";
 import { useNotifications } from "@/components/NotificationsProvider";
 import FundersTable from "@/components/escrow/FundersTable";
 import TokenCheck, { useFundingTokenCheck } from "@/components/escrow/TokenCheck";
-import { fundInvoice, getInvoice } from "@/lib/api";
+import { fundInvoice, getInvoice, listInvoices } from "@/lib/api";
 import BalanceHint from "@/components/wallet/BalanceHint";
 import { getWalletAddress } from "@/lib/stellar/freighter";
 import { bpsToPercent, formatAmount, formatDate, fundedPercent, shortAddress } from "@/lib/format";
+import { computeListMedians, scoreInvoice } from "@/lib/risk";
 import { loadConstraints, validateContribution, maxFillAmount, CODES } from "@/lib/escrow/constraints";
 import { parseToStroops, stroopsToDisplay } from "@/lib/stellar/amount";
 
@@ -20,6 +23,7 @@ const BLOCKING_CODES = new Set([CODES.PAUSED, CODES.LEGAL_HOLD, CODES.DEADLINE_P
 
 export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints }) {
   const [state, setState] = useState({ loading: true, data: null, offline: false });
+  const [medians, setMedians] = useState(null);
   const [amount, setAmount] = useState("");
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -40,6 +44,13 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
   useEffect(() => {
     let alive = true;
     getInvoice(id).then((r) => alive && setState({ loading: false, ...r }));
+    // List medians only refine the risk score; a failed list load never blocks the page.
+    Promise.resolve()
+      .then(() => listInvoices())
+      .then((listRes) => {
+        if (alive && listRes?.data) setMedians(computeListMedians(listRes.data));
+      })
+      .catch(() => {});
     return () => {
       alive = false;
     };
@@ -138,6 +149,7 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
 
   const pct = fundedPercent(inv);
   const remaining = Math.max(0, inv.amount - inv.fundedAmount);
+  const risk = scoreInvoice(inv, undefined, medians);
 
   return (
     <section className="section">
@@ -149,8 +161,9 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
             <h1 style={{ fontSize: "clamp(1.7rem,4vw,2.4rem)", margin: "4px 0" }}>{inv.sme}</h1>
             <div className="muted">Debtor: {inv.debtor}</div>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <StatusBadge status={inv.status} />
+            {risk.band && <RiskBadge band={risk.band} score={risk.score} factors={risk.factors} />}
             {inv.onChain && <span className="badge badge-chain">on-chain</span>}
             <button
               className="btn-ghost"
@@ -235,9 +248,15 @@ export default function InvoiceDetail({ id, loadConstraintsFn = loadConstraints 
             ) : (
               <p className="muted" style={{ marginTop: 12 }}>This invoice is <strong>{inv.status}</strong> and no longer accepts contributions.</p>
             )}
-            {msg && <div className={`notice notice-${msg.kind}`} style={{ marginTop: 14 }}>{msg.text}</div>}
+            {msg && <div role="status" aria-live="polite" className={`notice notice-${msg.kind}`} style={{ marginTop: 14 }}>{msg.text}</div>}
           </div>
         </div>
+
+        {risk.band && (
+          <div style={{ marginTop: 24 }}>
+            <RiskFactorsCard risk={risk} />
+          </div>
+        )}
 
         {inv.onChain && (
           <>
