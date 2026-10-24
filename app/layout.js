@@ -3,6 +3,7 @@ import { NotificationsProvider } from "@/components/NotificationsProvider";
 import SiteHeader from "@/components/SiteHeader";
 import ServiceWorkerRegistrar from "@/components/pwa/ServiceWorkerRegistrar";
 import SiteFooter from "@/components/SiteFooter";
+import SkipLink from "@/components/SkipLink";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 export const metadata = {
@@ -29,9 +30,10 @@ export default function RootLayout({ children }) {
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body>
+        <SkipLink />
         <NotificationsProvider>
           <SiteHeader />
-          <main id="main">{children}</main>
+          <main id="main" tabIndex={-1}>{children}</main>
           <SiteFooter />
         </NotificationsProvider>
         <ServiceWorkerRegistrar />
